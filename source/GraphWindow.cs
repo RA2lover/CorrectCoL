@@ -346,54 +346,88 @@ namespace CorrectCoL
             yaw_texture.Apply();
         }
 
-        void DrawLine(Texture2D tex, int x1, int y1, int x2, int y2, Color col)
-        {
-            int dy = (int)(y2 - y1);
-            int dx = (int)(x2 - x1);
-            int stepx, stepy;
-
-            if (dy < 0) { dy = -dy; stepy = -1; }
-            else { stepy = 1; }
-            if (dx < 0) { dx = -dx; stepx = -1; }
-            else { stepx = 1; }
-            dy <<= 1;
-            dx <<= 1;
-
-            float fraction = 0;
-
-            tex.SetPixel(x1, y1, col);
-            if (dx > dy)
-            {
-                fraction = dy - (dx >> 1);
-                while (Mathf.Abs(x1 - x2) > 1)
-                {
-                    if (fraction >= 0)
-                    {
-                        y1 += stepy;
-                        fraction -= dx;
-                    }
-                    x1 += stepx;
-                    fraction += dy;
-                    tex.SetPixel(x1, y1, col);
-                }
-            }
-            else
-            {
-                fraction = dx - (dy >> 1);
-                while (Mathf.Abs(y1 - y2) > 1)
-                {
-                    if (fraction >= 0)
-                    {
-                        x1 += stepx;
-                        fraction -= dy;
-                    }
-                    y1 += stepy;
-                    fraction += dx;
-                    tex.SetPixel(x1, y1, col);
-                }
-            }
+        void DrawPixel(Texture2D tex, int x, int y, Color col, float alpha) {
+            //sets the color of a single pixel on screen, blended with the contents behind it
+            tex.SetPixel(x, y, Color.Lerp(col, tex.GetPixel(x, y), alpha));
         }
 
+
+        void DrawLine(Texture2D tex, int x1, int y1, int x2, int y2, Color col) {
+            //now with antialiasing.
+            
+            //known issues:
+            //1:    Last pixel of a line isn't drawn.
+            //      This isn't a problem because it's generally filled by the next line.
+            //2:    Different-colored lines drawn on top of eachother on the same pass may not blend together properly.
+            //      This is caused by a stale texture buffer. Workaround: apply texture changes before plotting a new data line.
+            //3:    Segments within a low gradient section of a plot may present "ropey" aliasing artifacts.
+            //      This is caused by this method taking integer pixel locations as parameters.
+            //      A new method signature is needed in order to solve this, taking floating point coordinate arguments.
+            //      This would be a breaking change to the rest of the class.
+            
+            int dy = y2 - y1;
+            int dx = x2 - x1;
+            int xdir = 1;
+            int ydir = 1;
+
+            if (dx < 0) {
+            dx = -dx;
+                xdir = -1;
+            }
+
+            if (dy < 0) {
+                dy = -dy;
+                ydir = -1;
+            }
+
+            float fraction = 0;
+            float slope = 0;
+
+            if (dx >= dy) {
+                if (dx == 0){
+                    slope = 0;
+                }else{
+                    slope = (float)dy / dx;
+                }
+            if (x1 == x2){
+                   xdir = 0;
+            }
+                do{
+                    DrawPixel(tex, (int)x1, (int)y1,       col,   fraction);
+                    DrawPixel(tex, (int)x1, (int)y1+ydir,  col, 1-fraction);
+                    x1 += xdir;
+                    fraction += slope;
+                    if (fraction > 1){
+                        fraction--;
+                        y1 += ydir;
+                    }
+                } while (x1 != x2);
+                return;
+            }
+
+            if (dy >= dx) {
+                if (dy == 0){
+                    slope = 0;
+                }else{
+                    slope = (float)dx / dy;
+                }
+            if (y1 == y2){
+                   ydir = 0;
+            }
+                do{
+                    DrawPixel(tex, (int)x1,      (int)y1,  col,   fraction);
+                    DrawPixel(tex, (int)x1+xdir, (int)y1,  col, 1-fraction);
+                    y1 += ydir;
+                    fraction += slope;
+                    if (fraction > 1){
+                        fraction--;
+                        x1 += xdir;
+                    }
+                } while (y1 != y2);
+                return;
+            }
+        }
+        
         public const float dgr2rad = Mathf.PI / 180.0f;
         public const float rad2dgr = 1.0f / dgr2rad;
 
