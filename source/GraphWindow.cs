@@ -1,4 +1,4 @@
-﻿/*
+/*
 The MIT License (MIT)
 
 Copyright (c) 2016 Boris-Barboris
@@ -196,7 +196,7 @@ namespace CorrectCoL
             var color = GUI.color;
             GUI.color = Color.blue;
             GUILayout.Label(new GUIContent("Lift to Drag ratio", "Shows the ratio of lift to drag, higher is better"));
-            GUILayout.Label(new GUIContent("Blue vertical line", "AoA on wich Lift equals -(gravity + centrifugal)"));
+            GUILayout.Label(new GUIContent("Colored vertical lines", "Shows AoA on wich Lift equals -(gravity + centrifugal).\nGreen line displays required AoA for level flight at current mass.\nYellow line displays required AoA for level flight with a dry craft."));
             GUI.color = color;
             GUILayout.EndVertical();
             GUILayout.EndHorizontal();
@@ -409,6 +409,7 @@ namespace CorrectCoL
         static Vector3 CoM = Vector3.zero;
 
         static float wet_mass = 0.0f;
+        static float dry_mass = 0.0f;
 
         static float[] wet_torques_aoa = new float[num_pts * 2 - 1];
         static float[] dry_torques_aoa = new float[num_pts * 2 - 1];
@@ -453,10 +454,10 @@ namespace CorrectCoL
             }
 
             // dry the ship by choosing dry CoM
-            float smass = 0.0f;
+            dry_mass = 0.0f;
             wet_mass = 0.0f;
-            CoM = dry_CoM_recurs(EditorLogic.RootPart, ref smass, ref wet_mass);
-            CoM = CoM / smass;
+            CoM = dry_CoM_recurs(EditorLogic.RootPart, ref dry_mass, ref wet_mass);
+            CoM = CoM / dry_mass;
 
             // dry cycles
             for (int i = 0; i < AoA_net.Count; i++)
@@ -518,11 +519,17 @@ namespace CorrectCoL
                 DrawLine(pitch_texture, x0, y0, x1, y1, Color.blue);
             }
 
-            // level flight aoa
-            if (!float.IsNaN(level_flight_aoa))
+            // draw level flight AoA marker for current craft configuration
+            if (!float.IsNaN(level_flight_aoa_wet))
             {
-                int l0 = aoa2pixel(level_flight_aoa);
-                DrawLine(pitch_texture, l0, 0, l0, graph_height, Color.blue);
+                int l0 = aoa2pixel(level_flight_aoa_wet);
+                DrawLine(pitch_texture, l0, 0, l0, graph_height, Color.green);
+            }
+            // draw level flight AoA marker for an empty craft
+            if (!float.IsNaN(level_flight_aoa_dry))
+            {
+                int l0 = aoa2pixel(level_flight_aoa_dry);
+                DrawLine(pitch_texture, l0, 0, l0, graph_height, Color.yellow);
             }
 
             // yaw moments
@@ -744,6 +751,10 @@ namespace CorrectCoL
             return Vector3.zero;
         }
 
+        //This method should probably be refactored at some point.
+        //It seems like it was created as a workaround to EditorMarker_CoM.FindCenterOfMass not providing a dry CoM,
+        //but it was then also given the function of obtaining the ship's wet and dry mass as well for the rest of this class.
+        //Those functions should be relegated to ShipConstruct.GetShipMass instead. 
         public Vector3 dry_CoM_recurs(Part p, ref float mass_counter, ref float wet_mass)
         {
             Vector3 res = Vector3.zero;
@@ -769,7 +780,8 @@ namespace CorrectCoL
         static float yaw_wet_stability_region = 0.0f;
         static float yaw_dry_stability_region = 0.0f;
 
-        static float level_flight_aoa = 0.0f;
+        static float level_flight_aoa_wet = 0.0f;
+        static float level_flight_aoa_dry = 0.0f;
 
         static StabilityReport[] stability_reports = new StabilityReport[4];
 
@@ -787,11 +799,12 @@ namespace CorrectCoL
             stability_reports[2] = report_stability("fueled craft yaw", yaw_wet_stability_region);
             stability_reports[3] = report_stability("dry craft yaw", yaw_dry_stability_region);
 
-            // level flight aoa
-            level_flight_aoa = find_level_flight_aoa();
+            // find angles of attack required for level flight
+            level_flight_aoa_wet = find_level_flight_aoa(wet_mass);
+            level_flight_aoa_dry = find_level_flight_aoa(dry_mass);
         }
 
-        float find_level_flight_aoa()
+        float find_level_flight_aoa(float mass)
         {
             float res = 0.0f;
             int i = num_pts;
@@ -800,8 +813,8 @@ namespace CorrectCoL
             double rad = home.Radius + altitude;
             double grav_acc = home.gMagnitudeAtCenter / rad / rad;
             float level_acc = (float)(grav_acc - speed * speed / rad);
-
-            float cur_lift_acc = wet_lift[i] / wet_mass;
+            //this is still referring to "wet lift" but i'm pretty sure that figure doesn't change depending on craft mass.
+            float cur_lift_acc = wet_lift[i] / mass;
             int step = 1;
             if (cur_lift_acc < level_acc)
                 step = 1;
@@ -810,7 +823,7 @@ namespace CorrectCoL
             bool found = false;
             do
             {
-                float new_lift_acc = wet_lift[i] / wet_mass;
+                float new_lift_acc = wet_lift[i] / mass;
                 if (step > 0 ? new_lift_acc >= level_acc : new_lift_acc <= level_acc)
                 {
                     res = Mathf.Lerp(AoA_net[i - step], AoA_net[i], (level_acc - cur_lift_acc) / (new_lift_acc - cur_lift_acc));
@@ -825,6 +838,13 @@ namespace CorrectCoL
                 res = float.NaN;
 
             return res;
+        }
+
+	//override just in case something i didn't catch is still using the old method signature
+        [Obsolete("Use find_level_flight_aoa(mass) instead")]
+        float find_level_flight_aoa()
+        {
+            return find_level_flight_aoa(wet_mass);
         }
 
          float find_stability_region(float[] torque_data)
